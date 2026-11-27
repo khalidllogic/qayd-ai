@@ -21,7 +21,7 @@
           <p class="subtitle">محرك OCR عربي + تدقيق محاسبي حتمي + تصدير مباشر إلى Odoo &amp; Excel</p>
         </div>
       </div>
-      <div class="system-status" id="systemStatus" title="حالة الاتصال بالخادم ومفتاح Gemini API">
+      <div class="system-status" id="systemStatus" title="حالة الاتصال بالخادم">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">جاري فحص النظام...</span>
       </div>
@@ -29,11 +29,10 @@
   </header>
 
   <main class="container main-content">
-    <!-- تنبيه ضبط المفتاح إن لم يكن مضبوطاً -->
+    <!-- تنبيه حالة الخدمة -->
     <div class="alert alert-warning hidden" id="apiKeyBanner">
-      <strong>تنبيه إعداد:</strong> لم يتم ضبط <code>GEMINI_API_KEY</code> في ملف <code>.env</code> بعد.
-      يمكنك حالياً تجربة الإدخال اليدوي والتدقيق والتصدير، ولتفعيل قراءة الصور ضع مفتاحك في <code>.env</code> ثم أعد
-      التشغيل.
+      <strong>تنبيه النظام:</strong> خدمة القراءة الذكية غير متاحة مؤقتاً. يمكنك حالياً استخدام الإدخال اليدوي والتدقيق
+      المحاسبي والتصدير.
     </div>
 
     <!-- شريط التبويبات -->
@@ -83,7 +82,7 @@
           <div class="loader-box hidden" id="loaderBox">
             <div class="spinner"></div>
             <div class="loader-steps">
-              <p class="loader-title" id="loaderStepText">جاري تصحيح منظور الصورة وقراءة البيانات عبر Gemini...</p>
+              <p class="loader-title" id="loaderStepText">جاري معالجة الصورة واستخراج البيانات وتدقيقها...</p>
               <p class="loader-hint">قد يستغرق ذلك بضع ثوانٍ حسب دقة الصورة وعدد البنود</p>
             </div>
           </div>
@@ -618,10 +617,10 @@
       <button class="qayd-close" type="button" onclick="closeQaydModals()">✕</button>
       <h3 style="margin:0 0 6px;font-size:1.2rem;">امسح الرمز بكاميرا الجوال</h3>
       <p style="margin:0;color:#475569;font-size:0.88rem;">
-        تأكد أن الجوال واللابتوب متصلان بنفس شبكة <strong>Wi-Fi</strong> أو <strong>نقطة الاتصال</strong>
+        وجّه كاميرا جوالك نحو الرمز لالتقاط صورة الفاتورة وإرسالها مباشرة إلى هذه الشاشة
       </p>
       <img id="qayd-qr-img" alt="QR Code" />
-      <div class="qayd-ip-row">
+      <div class="qayd-ip-row" style="display:none;">
         <span>عنوان الشبكة:</span>
         <select id="qayd-ip-select"></select>
       </div>
