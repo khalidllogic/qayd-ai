@@ -1,31 +1,25 @@
-﻿import base64
+import base64
 import io
 import secrets
 import socket
 import time
-from typing import Optional
 
 import qrcode
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, Response
+
+try:
+    from backend.session_store import get_session, save_session
+except ImportError:
+    from session_store import get_session, save_session
 
 router = APIRouter()
 
-# تخزين الجلسات المؤقتة في الذاكرة: {session_id: {...}}
-MOBILE_SESSIONS: dict[str, dict] = {}
 SESSION_TTL_SECONDS = 1800  # 30 دقيقة
-
-
-def _cleanup_expired() -> None:
-    now = time.time()
-    expired = [k for k, v in MOBILE_SESSIONS.items() if now - v["created_at"] > SESSION_TTL_SECONDS]
-    for k in expired:
-        MOBILE_SESSIONS.pop(k, None)
 
 
 def get_local_ips() -> list[str]:
     ips: list[str] = []
-    # محاولة اكتشاف الـ IP النشط عبر جدول التوجيه
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 80))
@@ -35,13 +29,11 @@ def get_local_ips() -> list[str]:
     except Exception:
         pass
 
-    # جمع بقية عناوين IPv4 المحلية (Wi-Fi / Hotspot)
     try:
         hostname = socket.gethostname()
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
             ip = info[4][0]
             if ip and not ip.startswith("127.") and ip not in ips:
-                # إعطاء أولوية لشبكات Wi-Fi و Hotspot المعتادة
                 if ip.startswith(("192.168.", "10.", "172.")):
                     ips.append(ip)
     except Exception:
@@ -59,15 +51,18 @@ def mobile_network_info(request: Request):
 
 @router.post("/api/mobile/session")
 def create_mobile_session():
-    _cleanup_expired()
     session_id = secrets.token_urlsafe(6)
-    MOBILE_SESSIONS[session_id] = {
-        "created_at": time.time(),
-        "status": "waiting",  # waiting | uploaded
-        "filename": None,
-        "content_type": None,
-        "image_b64": None,
-    }
+    save_session(
+        session_id,
+        {
+            "created_at": time.time(),
+            "status": "waiting",  # waiting | uploaded
+            "filename": None,
+            "content_type": None,
+            "image_b64": None,
+        },
+        ttl_seconds=SESSION_TTL_SECONDS,
+    )
     return {"session_id": session_id}
 
 
@@ -84,10 +79,10 @@ def generate_qr_image(url: str):
 
 @router.get("/api/mobile/session/{session_id}/status")
 def get_session_status(session_id: str):
-    session = MOBILE_SESSIONS.get(session_id)
+    session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="انتهت صلاحية الجلسة.")
-    if session["status"] == "uploaded" and session["image_b64"]:
+    if session.get("status") == "uploaded" and session.get("image_b64"):
         return {
             "status": "uploaded",
             "filename": session["filename"],
@@ -99,7 +94,7 @@ def get_session_status(session_id: str):
 
 @router.post("/api/mobile/session/{session_id}/upload")
 async def upload_from_mobile(session_id: str, file: UploadFile = File(...)):
-    session = MOBILE_SESSIONS.get(session_id)
+    session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="انتهت صلاحية الجلسة، أعد مسح الرمز من اللابتوب.")
 
@@ -111,12 +106,14 @@ async def upload_from_mobile(session_id: str, file: UploadFile = File(...)):
     session["filename"] = file.filename or f"mobile_invoice_{int(time.time())}.jpg"
     session["content_type"] = file.content_type or "image/jpeg"
     session["image_b64"] = base64.b64encode(raw).decode("ascii")
+
+    save_session(session_id, session, ttl_seconds=SESSION_TTL_SECONDS)
     return {"ok": True, "message": "تم إرسال الصورة إلى اللابتوب بنجاح"}
 
 
 @router.get("/mobile/{session_id}", response_class=HTMLResponse)
 def mobile_capture_page(session_id: str):
-    if session_id not in MOBILE_SESSIONS:
+    if not get_session(session_id):
         return HTMLResponse(
             content="""
             <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8">
@@ -203,6 +200,25 @@ def mobile_capture_page(session_id: str):
       statusBox.textContent = msg;
     }}
 
+    function compressImage(file, maxDim = 1600, quality = 0.8) {{
+      return new Promise((resolve) => {{
+        const img = new Image();
+        img.onload = () => {{
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {{
+            if (w > h) {{ h = Math.round(h * maxDim / w); w = maxDim; }}
+            else {{ w = Math.round(w * maxDim / h); h = maxDim; }}
+          }}
+          const canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", quality);
+        }};
+        img.onerror = () => resolve(file);
+        img.src = URL.createObjectURL(file);
+      }});
+    }}
+
     cameraInput.addEventListener("change", async (e) => {{
       const file = e.target.files[0];
       if (!file) return;
@@ -211,8 +227,9 @@ def mobile_capture_page(session_id: str):
       previewBox.style.display = "block";
       showStatus("loading", "⏳ جاري ضغط وإرسال الفاتورة إلى اللابتوب...");
 
+      const compressed = await compressImage(file);
       const formData = new FormData();
-      formData.append("file", file, file.name || "invoice.jpg");
+      formData.append("file", compressed, "invoice.jpg");
 
       try {{
         const res = await fetch(`/api/mobile/session/${{sessionId}}/upload`, {{
@@ -226,7 +243,7 @@ def mobile_capture_page(session_id: str):
           showStatus("error", "❌ " + (data.detail || "فشل الإرسال"));
         }}
       }} catch (err) {{
-        showStatus("error", "❌ تعذر الاتصال باللابتوب. تأكد أنك على نفس شبكة Wi-Fi.");
+        showStatus("error", "❌ تعذر الاتصال بالسيرفر. تأكد من اتصالك بالإنترنت وحاول مرة أخرى.");
       }}
     }});
   </script>
