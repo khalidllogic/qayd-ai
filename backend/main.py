@@ -77,7 +77,7 @@ def health_check():
         "status": "ok",
         "service": "Qayd AI Integrated System",
         "api_key_configured": is_api_key_configured(),
-        "gemini_model": get_active_provider_label(),
+        "gemini_model":"محرك قَيد الذكي",
     }
 
 
