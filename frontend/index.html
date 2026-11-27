@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>قَيد الذكي | Qayd AI — نظام استخراج وتدقيق الفواتير</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <div class="brand-logo">ق</div>
+        <div>
+          <h1>قَيد الذكي <span class="badge-en">Qayd AI</span></h1>
+          <p class="subtitle">محرك OCR عربي + تدقيق محاسبي حتمي + تصدير مباشر إلى Odoo &amp; Excel</p>
+        </div>
+      </div>
+      <div class="system-status" id="systemStatus" title="حالة الاتصال بالخادم ومفتاح Gemini API">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">جاري فحص النظام...</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-content">
+    <!-- تنبيه ضبط المفتاح إن لم يكن مضبوطاً -->
+    <div class="alert alert-warning hidden" id="apiKeyBanner">
+      <strong>تنبيه إعداد:</strong> لم يتم ضبط <code>GEMINI_API_KEY</code> في ملف <code>.env</code> بعد.
+      يمكنك حالياً تجربة الإدخال اليدوي والتدقيق والتصدير، ولتفعيل قراءة الصور ضع مفتاحك في <code>.env</code> ثم أعد
+      التشغيل.
+    </div>
+
+    <!-- شريط التبويبات -->
+    <div class="tabs-bar">
+      <button class="tab-btn active" data-tab="invoiceTab" id="tabInvoiceBtn">
+        🧾 استخراج وتدقيق الفواتير (ERP &amp; Audit)
+      </button>
+      <button class="tab-btn" data-tab="textTab" id="tabTextBtn">
+        📝 نسخ النصوص من الصور (OCR حر)
+      </button>
+    </div>
+
+    <!-- التبويب الأول: الفواتير -->
+    <section id="invoiceTab" class="tab-panel active">
+      <div class="workspace-grid">
+        <!-- العمود الأيمن: رفع الصورة والمعاينة -->
+        <aside class="card upload-card">
+          <div class="card-header">
+            <h2>1. صورة الفاتورة</h2>
+            <button type="button" class="btn btn-ghost btn-sm" id="loadDemoBtn"
+              title="تعبئة فاتورة تجريبية لاختبار التدقيق والتصدير فوراً">
+              بيانات تجريبية ⚡
+            </button>
+          </div>
+
+          <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="ارفع صورة الفاتورة">
+            <input type="file" id="invoiceFileInput" accept="image/jpeg,image/png,image/webp,image/bmp" hidden />
+            <div class="dropzone-placeholder" id="dropzonePlaceholder">
+              <div class="upload-icon">📄</div>
+              <p class="drop-title">اسحب صورة الفاتورة وأفلتها هنا</p>
+              <p class="drop-sub">أو اضغط لاختيار ملف (JPG, PNG, WEBP) — مطبوعة أو بخط اليد</p>
+            </div>
+            <div class="preview-wrapper hidden" id="previewWrapper">
+              <img id="invoicePreviewImg" alt="معاينة الفاتورة" />
+              <div class="preview-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="changeImgBtn">تغيير الصورة</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="zoomImgBtn">تكبير / تصغير 🔍</button>
+              </div>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-primary btn-block" id="extractBtn" disabled>
+            🚀 استخراج البيانات وتدقيقها بالذكاء الاصطناعي
+          </button>
+
+          <!-- مؤشر التحميل المرحلي -->
+          <div class="loader-box hidden" id="loaderBox">
+            <div class="spinner"></div>
+            <div class="loader-steps">
+              <p class="loader-title" id="loaderStepText">جاري تصحيح منظور الصورة وقراءة البيانات عبر Gemini...</p>
+              <p class="loader-hint">قد يستغرق ذلك بضع ثوانٍ حسب دقة الصورة وعدد البنود</p>
+            </div>
+          </div>
+
+          <!-- رسالة خطأ -->
+          <div class="alert alert-danger hidden" id="errorBox"></div>
+        </aside>
+
+        <!-- العمود الأيسر: نتيجة التدقيق + نموذج المراجعة والتعديل + التصدير -->
+        <section class="results-column">
+          <!-- بطاقة حالة التدقيق المحاسبي -->
+          <div class="card audit-card status-neutral" id="auditCard">
+            <div class="audit-header">
+              <div>
+                <span class="audit-badge" id="auditBadge">بانتظار الفاتورة</span>
+                <h2 id="auditSummaryTitle">ارفع فاتورة أو حمّل بيانات تجريبية لبدء التدقيق</h2>
+              </div>
+              <div class="meta-pills">
+                <span class="pill hidden" id="timePill">⏱ 0 ms</span>
+                <span class="pill hidden" id="tafqeetValPill">التفقيط الرقمي: -</span>
+              </div>
+            </div>
+
+            <ul class="audit-list hidden" id="auditErrorsList"></ul>
+            <ul class="audit-list warnings-list hidden" id="auditWarningsList"></ul>
+          </div>
+
+          <!-- بطاقة البيانات المستخرجة القابلة للتعديل -->
+          <div class="card form-card">
+            <div class="card-header">
+              <h2>2. بيانات الفاتورة (قابلة للمراجعة والتعديل الحي)</h2>
+              <div class="header-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="reAuditBtn">
+                  🔄 إعادة التدقيق المحاسبي
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm" id="copyJsonBtn">
+                  نسخ JSON
+                </button>
+              </div>
+            </div>
+
+            <div class="form-grid-3">
+              <div class="form-group">
+                <label for="vendorName">اسم المورد</label>
+                <input type="text" id="vendorName" placeholder="مثال: شركة الأفق للتجارة" />
+              </div>
+              <div class="form-group">
+                <label for="invoiceNumber">رقم الفاتورة (Ref)</label>
+                <input type="text" id="invoiceNumber" placeholder="مثال: INV-2026-001" />
+              </div>
+              <div class="form-group">
+                <label for="invoiceDate">تاريخ الفاتورة</label>
+                <input type="text" id="invoiceDate" placeholder="YYYY-MM-DD" />
+              </div>
+            </div>
+
+            <!-- جدول الأصناف -->
+            <div class="table-toolbar">
+              <h3>جدول الأصناف والبنود</h3>
+              <button type="button" class="btn btn-secondary btn-sm" id="addItemBtn">+ إضافة صنف</button>
+            </div>
+
+            <div class="table-responsive">
+              <table class="items-table">
+                <thead>
+                  <tr>
+                    <th style="width: 42px;">#</th>
+                    <th>اسم الصنف / الوصف</th>
+                    <th style="width: 110px;">الكمية</th>
+                    <th style="width: 130px;">سعر الوحدة</th>
+                    <th style="width: 140px;">إجمالي السطر</th>
+                    <th style="width: 54px;">حذف</th>
+                  </tr>
+                </thead>
+                <tbody id="itemsTableBody">
+                  <tr class="empty-row">
+                    <td colspan="6">لا توجد أصناف حالياً. ارفع فاتورة أو أضف صنفاً يدوياً.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- الإجماليات والتفقيط -->
+            <div class="totals-grid">
+              <div class="tafqeet-box">
+                <div class="form-group">
+                  <label for="tafqeetText">نص التفقيط العربي (المبلغ كتابةً)</label>
+                  <textarea id="tafqeetText" rows="2" placeholder="مثال: فقط خمسة عشر ألف ريال لا غير"></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="expenseAccount">حساب المصروفات في Odoo</label>
+                  <input type="text" id="expenseAccount" value="600000 Expenses" placeholder="600000 Expenses" />
+                </div>
+              </div>
+
+              <div class="numbers-box">
+                <div class="num-row">
+                  <label for="subtotalInput">المجموع قبل الضريبة:</label>
+                  <input type="number" step="any" id="subtotalInput" value="0" />
+                </div>
+                <div class="num-row">
+                  <label for="discountInput">الخصم:</label>
+                  <input type="number" step="any" id="discountInput" value="0" />
+                </div>
+                <div class="num-row">
+                  <label for="taxInput">الضريبة:</label>
+                  <input type="number" step="any" id="taxInput" value="0" />
+                </div>
+                <div class="num-row grand-row">
+                  <label for="grandTotalInput">الإجمالي النهائي:</label>
+                  <input type="number" step="any" id="grandTotalInput" value="0" />
+                </div>
+              </div>
+            </div>
+
+            <!-- شريط التصدير -->
+            <div class="export-bar">
+              <button type="button" class="btn btn-success" id="exportOdooBtn">
+                📥 تصدير إلى Odoo (CSV)
+              </button>
+              <button type="button" class="btn btn-accent" id="exportExcelBtn">
+                📊 تصدير تقرير التدقيق (Excel .xlsx)
+              </button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <!-- التبويب الثاني: نسخ النص الحر -->
+    <section id="textTab" class="tab-panel">
+      <div class="card text-ocr-card">
+        <h2>استخراج ونسخ النصوص العربية من أي صورة أو مستند</h2>
+        <p class="muted-text">يستخدم محرك القراءة النصية الحرفية مع الحفاظ على ترتيب الأسطر والأرقام والهوامش.</p>
+        <div class="text-ocr-controls">
+          <input type="file" id="textFileInput" accept="image/jpeg,image/png,image/webp,image/bmp" />
+          <button type="button" class="btn btn-primary" id="extractTextBtn" disabled>استخراج النص الآن</button>
+          <button type="button" class="btn btn-secondary" id="copyPlainTextBtn">نسخ النص</button>
+        </div>
+        <div class="loader-box hidden" id="textLoaderBox">
+          <div class="spinner"></div>
+          <p>جاري قراءة النص من الصورة...</p>
+        </div>
+        <div class="alert alert-danger hidden" id="textErrorBox"></div>
+        <textarea id="plainTextOutput" class="plain-text-area" rows="14"
+          placeholder="سيظهر النص المستخرج هنا..."></textarea>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="/static/app.js"></script>
+
+  <!-- QAYD_INTERACTIVE_UI_AND_QR -->
+  <style>
+    @keyframes qaydFadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(18px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes qaydPopIn {
+      0% {
+        opacity: 0;
+        transform: scale(0.9) translateY(14px);
+      }
+
+      100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    @keyframes qaydFloat {
+
+      0%,
+      100% {
+        transform: translateY(0px);
+      }
+
+      50% {
+        transform: translateY(-5px);
+      }
+    }
+
+    @keyframes qaydScanBeam {
+      0% {
+        top: 5%;
+        opacity: 0;
+      }
+
+      15% {
+        opacity: 1;
+      }
+
+      85% {
+        opacity: 1;
+      }
+
+      100% {
+        top: 92%;
+        opacity: 0;
+      }
+    }
+
+    @keyframes qaydPulseRing {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      }
+
+      70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 12px rgba(16, 185, 129, 0);
+      }
+
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+
+    @keyframes qaydShimmer {
+      0% {
+        background-position: -200% center;
+      }
+
+      100% {
+        background-position: 200% center;
+      }
+    }
+
+    @keyframes qaydRowIn {
+      from {
+        opacity: 0;
+        transform: translateX(14px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    header,
+    section,
+    .card,
+    [class*="card"],
+    [class*="panel"] {
+      animation: qaydFadeUp 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+      transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+    }
+
+    button {
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease !important;
+    }
+
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.14);
+    }
+
+    button:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    input,
+    select,
+    textarea {
+      transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.2) !important;
+    }
+
+    tbody tr {
+      animation: qaydRowIn 0.35s ease both;
+    }
+
+    tbody tr:hover {
+      background-color: rgba(2, 132, 199, 0.04) !important;
+    }
+
+    .qayd-ripple {
+      position: absolute;
+      border-radius: 50%;
+      transform: scale(0);
+      animation: qaydRippleAnim 0.55s linear;
+      background-color: rgba(255, 255, 255, 0.45);
+      pointer-events: none;
+    }
+
+    @keyframes qaydRippleAnim {
+      to {
+        transform: scale(4);
+        opacity: 0;
+      }
+    }
+
+    #qayd-scan-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.5);
+      backdrop-filter: blur(4px);
+      z-index: 9995;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+
+    #qayd-scan-overlay.active {
+      display: flex;
+    }
+
+    .qayd-scanner-box {
+      width: 280px;
+      height: 180px;
+      border: 2px solid #38bdf8;
+      border-radius: 18px;
+      position: relative;
+      background: rgba(15, 23, 42, 0.85);
+      box-shadow: 0 0 40px rgba(56, 189, 248, 0.4);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+    }
+
+    .qayd-scanner-line {
+      position: absolute;
+      left: 6%;
+      right: 6%;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #38bdf8, #34d399, #38bdf8, transparent);
+      box-shadow: 0 0 14px #38bdf8;
+      animation: qaydScanBeam 1.5s ease-in-out infinite;
+    }
+
+    #qayd-mobile-trigger {
+      position: fixed;
+      bottom: 22px;
+      left: 22px;
+      z-index: 9990;
+      background: linear-gradient(135deg, #0284c7, #2563eb, #0284c7);
+      background-size: 200% auto;
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      padding: 13px 22px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(2, 132, 199, 0.38);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: qaydFloat 3s ease-in-out infinite, qaydShimmer 4s linear infinite;
+    }
+
+    .qayd-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.72);
+      backdrop-filter: blur(5px);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .qayd-overlay.active {
+      display: flex;
+    }
+
+    .qayd-modal {
+      background: #ffffff;
+      color: #0f172a;
+      border-radius: 22px;
+      width: 100%;
+      max-width: 440px;
+      padding: 28px;
+      text-align: center;
+      box-shadow: 0 25px 55px rgba(0, 0, 0, 0.3);
+      position: relative;
+      direction: rtl;
+      animation: qaydPopIn 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .qayd-close {
+      position: absolute;
+      top: 14px;
+      left: 16px;
+      background: #f1f5f9;
+      border: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      font-size: 1.1rem;
+      cursor: pointer;
+      color: #475569;
+    }
+
+    .qayd-choice-btn {
+      width: 100%;
+      padding: 15px;
+      border-radius: 13px;
+      border: none;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .qayd-btn-primary {
+      background: linear-gradient(135deg, #0284c7, #1d4ed8);
+      color: #fff;
+    }
+
+    .qayd-btn-secondary {
+      background: #f1f5f9;
+      color: #334155;
+    }
+
+    #qayd-qr-img {
+      width: 220px;
+      height: 220px;
+      margin: 14px auto;
+      display: block;
+      border: 2px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 8px;
+      background: #fff;
+      transition: transform 0.3s ease;
+    }
+
+    #qayd-qr-img:hover {
+      transform: scale(1.04);
+    }
+
+    .qayd-ip-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 0.85rem;
+      color: #475569;
+    }
+
+    #qayd-ip-select {
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      font-family: monospace;
+      direction: ltr;
+    }
+
+    .qayd-pulse {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-left: 6px;
+      animation: qaydPulseRing 1.4s infinite;
+    }
+
+    #qayd-toast {
+      position: fixed;
+      top: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #059669, #047857);
+      color: #fff;
+      padding: 13px 24px;
+      border-radius: 14px;
+      font-weight: 700;
+      z-index: 10000;
+      display: none;
+      box-shadow: 0 12px 28px rgba(5, 150, 105, 0.35);
+      animation: qaydPopIn 0.3s ease both;
+    }
+  </style>
+
+  <button id="qayd-mobile-trigger" type="button">📱 التصوير من الجوال (QR)</button>
+  <div id="qayd-toast">✅ وصلت صورة الفاتورة من الجوال! اضغط (استخراج البيانات) الآن.</div>
+
+  <div id="qayd-scan-overlay">
+    <div class="qayd-scanner-box">
+      <div class="qayd-scanner-line"></div>
+      <span>🔍 جاري قراءة وتدقيق الفاتورة...</span>
+    </div>
+  </div>
+
+  <div id="qayd-welcome-overlay" class="qayd-overlay active">
+    <div class="qayd-modal">
+      <button class="qayd-close" type="button" onclick="closeQaydModals()">✕</button>
+      <div style="font-size:2.8rem;margin-bottom:8px;animation:qaydFloat 2.4s ease-in-out infinite;">📱</div>
+      <h3 style="margin:0 0 8px;font-size:1.3rem;">هل تريد التصوير من الجوال مباشرة؟</h3>
+      <p style="margin:0 0 16px;color:#475569;font-size:0.93rem;line-height:1.6;">
+        امسح رمز QR بكاميرا جوالك لتصوير الفاتورة وإرسالها فوراً إلى هذه الشاشة.
+      </p>
+      <button class="qayd-choice-btn qayd-btn-primary" type="button" onclick="startMobileQR()">
+        📸 نعم، افتح رمز QR للتصوير من الجوال
+      </button>
+      <button class="qayd-choice-btn qayd-btn-secondary" type="button" onclick="closeQaydModals()">
+        💻 لا، سأرفع الصورة من اللابتوب
+      </button>
+    </div>
+  </div>
+
+  <div id="qayd-qr-overlay" class="qayd-overlay">
+    <div class="qayd-modal">
+      <button class="qayd-close" type="button" onclick="closeQaydModals()">✕</button>
+      <h3 style="margin:0 0 6px;font-size:1.2rem;">امسح الرمز بكاميرا الجوال</h3>
+      <p style="margin:0;color:#475569;font-size:0.88rem;">
+        تأكد أن الجوال واللابتوب متصلان بنفس شبكة <strong>Wi-Fi</strong> أو <strong>نقطة الاتصال</strong>
+      </p>
+      <img id="qayd-qr-img" alt="QR Code" />
+      <div class="qayd-ip-row">
+        <span>عنوان الشبكة:</span>
+        <select id="qayd-ip-select"></select>
+      </div>
+      <div
+        style="margin-top:14px;padding:11px;background:#f0fdf4;border-radius:12px;color:#166534;font-size:0.9rem;font-weight:600;">
+        <span class="qayd-pulse"></span> بانتظار التقاط الصورة من الجوال...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      document.addEventListener("click", function (e) {
+        const btn = e.target.closest("button");
+        if (!btn || btn.disabled) return;
+        const circle = document.createElement("span");
+        const diameter = Math.max(btn.clientWidth, btn.clientHeight);
+        const radius = diameter / 2;
+        const rect = btn.getBoundingClientRect();
+        circle.style.width = circle.style.height = `${diameter}px`;
+        circle.style.left = `${e.clientX - rect.left - radius}px`;
+        circle.style.top = `${e.clientY - rect.top - radius}px`;
+        circle.classList.add("qayd-ripple");
+        const old = btn.querySelector(".qayd-ripple");
+        if (old) old.remove();
+        btn.appendChild(circle);
+      });
+
+      const scanOverlay = document.getElementById("qayd-scan-overlay");
+      const origFetch = window.fetch;
+      window.fetch = async function (...args) {
+        const url = typeof args[0] === "string" ? args[0] : (args[0] && args[0].url) || "";
+        const isHeavy = url.includes("/api/process") || url.includes("/api/extract") || url.includes("/api/ocr");
+        if (isHeavy && scanOverlay) scanOverlay.classList.add("active");
+        try {
+          return await origFetch.apply(this, args);
+        } finally {
+          if (isHeavy && scanOverlay) scanOverlay.classList.remove("active");
+        }
+      };
+
+      let pollTimer = null;
+      let currentSessionId = null;
+      let networkPort = 8000;
+
+      const welcomeOverlay = document.getElementById("qayd-welcome-overlay");
+      const qrOverlay = document.getElementById("qayd-qr-overlay");
+      const qrImg = document.getElementById("qayd-qr-img");
+      const ipSelect = document.getElementById("qayd-ip-select");
+      const toast = document.getElementById("qayd-toast");
+
+      window.closeQaydModals = function () {
+        welcomeOverlay.classList.remove("active");
+        qrOverlay.classList.remove("active");
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      };
+
+      function updateQRImage() {
+        if (!currentSessionId) return;
+        const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+        const mobileUrl = isLocal
+          ? `http://${ipSelect.value || "127.0.0.1"}:${networkPort}/mobile/${currentSessionId}`
+          : `${window.location.origin}/mobile/${currentSessionId}`;
+        qrImg.src = `/api/mobile/qr?url=${encodeURIComponent(mobileUrl)}`;
+      }
+      ipSelect.addEventListener("change", updateQRImage);
+
+      window.startMobileQR = async function () {
+        welcomeOverlay.classList.remove("active");
+        qrOverlay.classList.add("active");
+        try {
+          const [netRes, sessRes] = await Promise.all([
+            origFetch("/api/mobile/network-info"),
+            origFetch("/api/mobile/session", { method: "POST" })
+          ]);
+          const netData = await netRes.json();
+          const sessData = await sessRes.json();
+          networkPort = netData.port || 8000;
+          currentSessionId = sessData.session_id;
+
+          ipSelect.innerHTML = "";
+          (netData.ips || ["127.0.0.1"]).forEach(ip => {
+            const opt = document.createElement("option");
+            opt.value = ip;
+            opt.textContent = ip;
+            ipSelect.appendChild(opt);
+          });
+          updateQRImage();
+
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = setInterval(async () => {
+            try {
+              const stRes = await origFetch(`/api/mobile/session/${currentSessionId}/status`);
+              if (!stRes.ok) return;
+              const st = await stRes.json();
+              if (st.status === "uploaded" && st.image_b64) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                injectMobileImageToLaptop(st.image_b64, st.filename || "mobile_invoice.jpg", st.content_type || "image/jpeg");
+              }
+            } catch (_) { }
+          }, 1500);
+        } catch (e) {
+          alert("تعذر إنشاء جلسة الجوال.");
+        }
+      };
+
+      function injectMobileImageToLaptop(b64, filename, mimeType) {
+        const byteChars = atob(b64);
+        const byteNumbers = new Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+        const file = new File([blob], filename, { type: mimeType, lastModified: Date.now() });
+
+        const fileInput = document.querySelector('input[type="file"]');
+        if (fileInput) {
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+          fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        closeQaydModals();
+        toast.style.display = "block";
+        setTimeout(() => { toast.style.display = "none"; }, 5000);
+      }
+
+      document.getElementById("qayd-mobile-trigger").addEventListener("click", window.startMobileQR);
+    })();
+  </script>
+</body>
+
+</html>
